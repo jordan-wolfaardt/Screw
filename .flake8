@@ -1,0 +1,6 @@
+[flake8]
+import-order-style = smarkets
+application-import-names = src
+max-line-length = 99
+extend-ignore = E501
+exclude = .git, .pytest_cache, .mypy_cache, usr, etc, root

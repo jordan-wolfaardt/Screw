@@ -1,0 +1,5 @@
+services:
+    game-runner:
+        build:
+          context: .
+          dockerfile: ./Dockerfile
