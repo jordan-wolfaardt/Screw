@@ -159,7 +159,7 @@ class Game:
 
             stored_last_play = self.last_play
 
-            self.handle_play(player_number=self.player_turn)
+            self.loop_until_valid_play(player_number=self.player_turn)
 
             player_wins = self.check_victory(player_number=self.player_turn)
 
@@ -191,10 +191,6 @@ class Game:
 
         self.player_turn = (self.player_turn + update) % self.number_of_players
 
-    def handle_play(self, player_number: int) -> None:
-        play = self.loop_until_valid_play(player_number=player_number)
-        self.update_game_state_for_play(play=play, player_number=player_number)
-
     def loop_until_valid_play(self, player_number: int) -> Play:
 
         valid_play = False
@@ -204,6 +200,7 @@ class Game:
             play = self.get_valid_play(player_number=player_number)
             if play is not None:
                 valid_play = True
+                self.update_game_state_for_play(play=play, player_number=player_number)
 
         assert play
         return play

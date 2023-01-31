@@ -476,27 +476,6 @@ class TestGame:
         game.handle_turn_update(stored_last_play=stored_last_play)
         assert game.player_turn == update % game.number_of_players
 
-    def test_handle_play(self, game: Game, monkeypatch: MonkeyPatch) -> None:
-
-        monkeypatch.setattr(
-            game.messaging,
-            "request",
-            lambda player_number, request_type: Response(
-                action=Action.PLAY_KNOWN_CARDS, cards="S3,H3"
-            ),
-        )
-
-        player_number = randint(0, game.number_of_players - 1)
-
-        card1 = Card(suit="Spades", value="3")
-        card2 = Card(suit="Hearts", value="3")
-
-        game.player_hands[player_number].hand_stack = Stack(cards=[card1, card2])
-
-        game.handle_play(player_number=player_number)
-
-        assert len(game.player_hands[player_number].hand_stack) == 1
-
     def test_loop_until_valid_play(self, game: Game, monkeypatch: MonkeyPatch) -> None:
 
         monkeypatch.setattr(
