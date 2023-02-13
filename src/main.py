@@ -26,12 +26,11 @@ def run_game(number_of_players: int, connection: Connection) -> None:
 
 
 def create_socket_connections(number_of_players: int) -> dict:
-    sockets = {}
+    sockets: dict[int, zmq.Socket] = {}
 
     for i in range(number_of_players):
-        sockets[i] = {}
         socket = context.socket(zmq.REQ)
-        socket.connect(f"tcp://player{i+1}:5000")
+        socket.connect(f"tcp://player{i}:5000")
         sockets[i] = socket
 
     return sockets

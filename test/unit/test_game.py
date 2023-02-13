@@ -28,7 +28,7 @@ from src.game_types import RequestType, Response
 from src.messaging import Messaging
 from src.utilities import (
     build_face_up_table_stack,
-    card_set_from_stack,
+    deserialize_card,
     deserialize_cards,
     serialize_cards,
 )
@@ -173,7 +173,7 @@ class TestGame:
         monkeypatch.setattr(game, "messaging", mock_messaging)
         monkeypatch.setattr(
             game.messaging,
-            "update_and_request",
+            "request",
             lambda player_number, request_type: mock_request_set_table_cards(
                 player_number=player_number
             ),
@@ -222,7 +222,7 @@ class TestGame:
 
         monkeypatch.setattr(
             game.messaging,
-            "update_and_request",
+            "request",
             lambda player_number, request_type: Response(
                 action=Action.SET_TABLE_CARDS, cards="S2,S3,S4"
             ),
@@ -340,7 +340,7 @@ class TestGame:
 
         monkeypatch.setattr(
             game.messaging,
-            "update_and_request",
+            "request",
             lambda player_number, request_type: Response(
                 action=Action.SET_TABLE_CARDS, cards=response_cards
             ),
@@ -420,6 +420,11 @@ class TestGame:
         assert len(game.deck) == DECK_LEN - 1
         game.assert_conservation_of_cards()
 
+        # empty deck scenario
+        game.deck = Stack()
+        game.deal_card(player_number=player_number)
+        assert len(game.player_hands[player_number].hand_stack) == 1
+
     def test_run(self, game: Game, monkeypatch: MonkeyPatch) -> None:
 
         player_number = randint(0, game.number_of_players - 1)
@@ -435,46 +440,22 @@ class TestGame:
             ),
         )
 
-        monkeypatch.setattr(game, "check_victory", lambda player_number: True)
-
         game.player_turn = player_number
 
         game.run()
 
     @pytest.mark.parametrize(
-        "last_play,stored_last_play,update",
+        "count,expected_player_turn",
         [
-            (None, None, 1),
-            (Stack(cards=[Card(value="10", suit="Spades")]), None, 0),
-            (
-                Stack(cards=[Card(value="2", suit="Spades")]),
-                Stack(cards=[Card(value="5", suit="Spades")]),
-                1,
-            ),
-            (Stack(cards=[Card(value="5", suit="Spades")]), None, 1),
-            (
-                Stack(cards=[Card(value="5", suit="Spades")]),
-                Stack(cards=[Card(value="5", suit="Diamonds")]),
-                2,
-            ),
-            (
-                Stack(cards=[Card(value="5", suit="Spades")]),
-                Stack(cards=[Card(value="4", suit="Spades")]),
-                1,
-            ),
+            (1, 1),
+            (3, 0),
+            (4, 1),
         ],
     )
-    def test_handle_turn_update(
-        self,
-        game: Game,
-        last_play: Optional[Stack],
-        stored_last_play: Optional[Stack],
-        update: int,
-    ) -> None:
-
-        game.last_play = last_play
-        game.handle_turn_update(stored_last_play=stored_last_play)
-        assert game.player_turn == update % game.number_of_players
+    def test_update_turn(self, game: Game, count: int, expected_player_turn: int) -> None:
+        game.number_of_players = 3
+        game.update_turn(count=count)
+        assert game.player_turn == expected_player_turn
 
     def test_loop_until_valid_play(self, game: Game, monkeypatch: MonkeyPatch) -> None:
 
@@ -520,8 +501,35 @@ class TestGame:
             else raise_(exception),
         )
 
-        with raises:
-            game.receive_and_validate_play(player_number=0)
+        monkeypatch.setattr(game, "update_game_state_for_play", lambda player_number, play: None)
+
+        if raises_bool:
+            assert game.get_valid_play(player_number=0) is False
+        else:
+            assert game.get_valid_play(player_number=0) is True
+
+    @pytest.mark.parametrize(
+        "hand_cards,expected_action",
+        [
+            (Stack(cards=[Card(value="2", suit="Diamonds")]), Action.PLAY_KNOWN_CARDS),
+            (Stack(), Action.PLAY_FACE_DOWN),
+        ],
+    )
+    def test_receive_and_validate_play(
+        self, game: Game, hand_cards: Stack, expected_action: Action, monkeypatch: MonkeyPatch
+    ) -> None:
+        response = Response(action=Action.PLAY_KNOWN_CARDS, cards="D2")
+        monkeypatch.setattr(
+            game.messaging,
+            "request",
+            lambda player_number, request_type: response,
+        )
+        player_number = 0
+        game.deal_table_cards()
+        game.discard_pile = Stack(cards=[Card(value="2", suit="Spades")])
+        game.player_hands[player_number].hand_stack = hand_cards
+        play = game.receive_and_validate_play(player_number=player_number)
+        assert play.action == expected_action
 
     @pytest.mark.parametrize(
         "serialized_response,expected",
@@ -540,38 +548,12 @@ class TestGame:
 
         monkeypatch.setattr(
             game.messaging,
-            "update_and_request",
+            "request",
             lambda player_number, request_type: serialized_response,
         )
 
         with expected:
             assert game.handle_request(player_number=0, request_type=RequestType.PLAY)
-
-    def test_receive_and_validate_face_down_play(self, game: Game) -> None:
-
-        game.deal_table_cards()
-
-        game.receive_and_validate_play(player_number=0)
-
-    def test_receive_and_validate_play_from_hand(
-        self, game: Game, monkeypatch: MonkeyPatch
-    ) -> None:
-
-        game.deal_table_cards()
-
-        card = Card(suit="Spades", value="2")
-
-        response = Response(action=Action.PLAY_KNOWN_CARDS, cards="S2")
-
-        monkeypatch.setattr(
-            game.messaging,
-            "update_and_request",
-            lambda player_number, request_type: response,
-        )
-
-        game.player_hands[0].hand_stack = Stack(cards=[card])
-
-        game.receive_and_validate_play(player_number=0)
 
     @pytest.mark.parametrize(
         "play,discard_pile,last_play,hand_stack,expected",
@@ -638,142 +620,190 @@ class TestGame:
             game.validate_play(play=play, player_number=0)
 
     @pytest.mark.parametrize(
-        "bottom_card,last_play,expected_action",
+        "bottom_card,last_play,play_face_down_success",
         [
             (
                 Card(suit="Diamonds", value="9"),
                 Stack(cards=[Card(suit="Diamonds", value="8")]),
-                Action.PLAY_FACE_DOWN,
+                True,
             ),
             (
                 Card(suit="Diamonds", value="8"),
                 Stack(cards=[Card(suit="Diamonds", value="9")]),
-                Action.PICK_UP_DISCARD_PILE,
+                False,
             ),
         ],
     )
-    def test_handle_face_down_card_play(
-        self, game: Game, bottom_card: Card, last_play: Stack, expected_action: Action
+    def test_handle_face_down_play(
+        self, game: Game, bottom_card: Card, last_play: Stack, play_face_down_success
     ) -> None:
 
         player_number = 0
         game.player_hands[player_number].table_stacks = [TableStack(bottom_card=bottom_card)]
         game.last_play = last_play
+        game.discard_pile = deserialize_cards("S2")
 
-        play = game.handle_face_down_card_play(player_number=player_number)
+        game.handle_face_down_play(player_number=player_number)
 
-        assert play.action == expected_action
-
-        if play.action == Action.PLAY_FACE_DOWN:
-            play.cards == Stack(cards=[bottom_card])
-        elif play.action == Action.PICK_UP_DISCARD_PILE:
-            assert game.player_hands[player_number].hand_stack == Stack(cards=[bottom_card])
+        if play_face_down_success:
             assert len(game.player_hands[player_number].table_stacks) == 0
+        else:
+            assert len(game.discard_pile) == 0
+
+    def test_pickup_discard_pile(self, game: Game) -> None:
+        player_number = 0
+        game.discard_pile = deserialize_cards("H2")
+        game.last_play = deserialize_cards("H2")
+        game.pickup_discard_pile(player_number=player_number)
+        assert game.player_hands[player_number].hand_stack == deserialize_cards("H2")
+        assert game.last_play is None
+        assert game.player_turn == 1
 
     @pytest.mark.parametrize(
-        "play,raises",
+        "top_card,last_play,play_face_down_success",
         [
-            (Play(action=Action.PICK_UP_DISCARD_PILE), nullcontext()),
+            (
+                Card(suit="Diamonds", value="9"),
+                Stack(cards=[Card(suit="Diamonds", value="8")]),
+                True,
+            ),
+            (
+                Card(suit="Diamonds", value="8"),
+                Stack(cards=[Card(suit="Diamonds", value="9")]),
+                False,
+            ),
+        ],
+    )
+    def test_handle_face_up_play(
+        self, game: Game, top_card: Card, last_play: Stack, play_face_down_success
+    ) -> None:
+
+        player_number = 0
+        game.player_hands[player_number].table_stacks = [
+            TableStack(bottom_card=deserialize_card(card_code="H2"), top_card=top_card)
+        ]
+        game.last_play = last_play
+        game.discard_pile = deserialize_cards("S2")
+
+        game.handle_face_up_play(player_number=player_number, cards_played=Stack(cards=[top_card]))
+
+        if play_face_down_success:
+            assert game.player_hands[player_number].table_stacks[0].top_card is None
+        else:
+            assert len(game.discard_pile) == 0
+
+    @pytest.mark.parametrize(
+        "play,encoded_hand_cards",
+        [
+            (Play(action=Action.PICK_UP_DISCARD_PILE), ""),
             (
                 Play(
                     action=Action.PLAY_FACE_DOWN,
-                    cards=Stack(cards=[Card(suit="Diamonds", value="9")]),
+                    cards=Stack(cards=[Card(suit="Diamonds", value="3")]),
                 ),
-                nullcontext(),
+                "",
             ),
             (
                 Play(
                     action=Action.PLAY_KNOWN_CARDS,
                     cards=Stack(cards=[Card(suit="Diamonds", value="9")]),
                 ),
-                nullcontext(),
+                "D9",
             ),
-            (Play(action=Action.SET_TABLE_CARDS), pytest.raises(Exception)),
+            (
+                Play(
+                    action=Action.PLAY_KNOWN_CARDS,
+                    cards=Stack(cards=[Card(suit="Diamonds", value="3")]),
+                ),
+                "",
+            ),
         ],
     )
-    def test_update_game_state_for_play(self, game: Game, play: Play, raises: nullcontext) -> None:
+    def test_update_game_state_for_play(
+        self, game: Game, play: Play, encoded_hand_cards: str
+    ) -> None:
 
         player_number = 0
         discard_pile = Stack(
             cards=[Card(suit="Diamonds", value="7"), Card(suit="Diamonds", value="8")]
         )
         game.discard_pile = copy.deepcopy(discard_pile)
-        game.player_hands[player_number].hand_stack = Stack(
-            cards=[Card(suit="Diamonds", value="9")]
+        game.player_hands[player_number].hand_stack = deserialize_cards(
+            encoded_cards=encoded_hand_cards
+        )
+        game.last_play = deserialize_cards(encoded_cards="H5")
+
+        table_stack = TableStack(
+            bottom_card=Card(value="4", suit="Hearts"),
         )
 
-        top_of_deck = game.deck[-1]
+        game.player_hands[player_number].table_stacks = [table_stack]
 
-        with raises:
-            game.update_game_state_for_play(play=play, player_number=player_number)
+        game.update_game_state_for_play(play=play, player_number=player_number)
 
-            if play.action == Action.PICK_UP_DISCARD_PILE:
-                assert card_set_from_stack(
-                    game.player_hands[player_number].hand_stack
-                ) - card_set_from_stack(discard_pile) == {("9", "Diamonds")}
-                assert game.last_play is None
-            elif play.action == Action.PLAY_FACE_DOWN:
-                assert game.last_play == play.cards
-            elif play.action == Action.PLAY_KNOWN_CARDS:
-                assert game.player_hands[player_number].hand_stack == Stack(cards=[top_of_deck])
-                assert game.last_play == play.cards
-                assert card_set_from_stack(discard_pile + play.cards) == card_set_from_stack(
-                    game.discard_pile
-                )
+        if play.action == Action.PLAY_KNOWN_CARDS and len(encoded_hand_cards) > 0:
+            assert len(game.player_hands[player_number].hand_stack) == 1
+        elif play.action == Action.PLAY_FACE_DOWN:
+            assert len(game.discard_pile) == 0
+            assert len(game.player_hands[player_number].hand_stack) == len(discard_pile) + 1
+        else:
+            assert len(game.discard_pile) == 0
+            assert len(game.player_hands[player_number].hand_stack) == len(discard_pile)
 
     @pytest.mark.parametrize(
-        "hand_stack,table_stacks,cards_played,raises",
+        "played_cards,encoded_hand_cards",
         [
-            (
-                Stack(cards=[Card(value="9", suit="Hearts"), Card(value="8", suit="Hearts")]),
-                None,
-                Stack(cards=[Card(value="9", suit="Hearts")]),
-                nullcontext(),
-            ),
-            (
-                Stack(),
-                [
-                    TableStack(
-                        bottom_card=Card(value="8", suit="Hearts"),
-                        top_card=Card(value="9", suit="Hearts"),
-                    )
-                ],
-                Stack(cards=[Card(value="9", suit="Hearts")]),
-                nullcontext(),
-            ),
-            (
-                Stack(),
-                [TableStack(bottom_card=Card(value="8", suit="Hearts"))],
-                Stack(cards=[Card(value="9", suit="Hearts")]),
-                pytest.raises(CardsNotAvailableException),
-            ),
+            ("H5", ""),
+            ("HT", "H6"),
+            ("H4", "H6"),
+            ("H7", "H6"),
         ],
     )
-    def test_remove_cards_from_players_hand(
-        self,
-        game: Game,
-        hand_stack: Stack,
-        table_stacks: Optional[list[TableStack]],
-        cards_played: Stack,
-        raises: nullcontext,
-    ) -> None:
+    def test_play_cards(self, game: Game, played_cards: str, encoded_hand_cards: str) -> None:
 
         player_number = 0
-        game.player_hands[player_number].hand_stack = copy.deepcopy(hand_stack)
+        game.last_play = deserialize_cards(encoded_cards="S7")
 
-        if table_stacks is not None:
-            assert table_stacks
-            game.player_hands[player_number].table_stacks = copy.deepcopy(table_stacks)
+        game.player_hands[player_number].hand_stack = deserialize_cards(
+            encoded_cards=encoded_hand_cards
+        )
+        game.play_cards(
+            player_number=player_number, cards=deserialize_cards(encoded_cards=played_cards)
+        )
 
-        with raises:
-            game.remove_cards_from_players_hand(
-                player_number=player_number, cards_played=cards_played
-            )
+        if len(encoded_hand_cards) == 0:
+            assert game.win == player_number
+            assert len(game.eliminated_cards) == 0
+        elif played_cards == "HT":
+            assert game.win is None
+            assert len(game.eliminated_cards) > 0
+            assert game.player_turn == 0
+        elif played_cards == "H7":
+            assert game.win is None
+            assert len(game.eliminated_cards) == 0
+            assert game.player_turn == 2 % game.number_of_players
+        else:
+            assert game.win is None
+            assert len(game.eliminated_cards) == 0
+            assert game.player_turn == 1
 
-            if len(hand_stack):
-                assert len(game.player_hands[player_number].hand_stack) == 1
-            else:
-                assert game.player_hands[player_number].table_stacks[0].top_card is None
+    @pytest.mark.parametrize(
+        "encoded_last_play",
+        [
+            "HT",
+            "H4",
+            "H5",
+        ],
+    )
+    def test_check_for_burn(self, game: Game, encoded_last_play: str) -> None:
+        game.discard_pile = deserialize_cards(encoded_cards="D4,C4,S4," + encoded_last_play)
+        game.last_play = deserialize_cards(encoded_cards=encoded_last_play)
+        if encoded_last_play == "HT":
+            assert game.check_for_burn() is True
+        elif encoded_last_play == "H4":
+            assert game.check_for_burn() is True
+        elif encoded_last_play == "H5":
+            assert game.check_for_burn() is False
 
     @pytest.mark.parametrize(
         "hand_stack,cards,raises",
@@ -810,9 +840,13 @@ class TestGame:
                     TableStack(
                         bottom_card=Card(value="8", suit="Hearts"),
                         top_card=Card(value="9", suit="Hearts"),
-                    )
+                    ),
+                    TableStack(
+                        bottom_card=Card(value="8", suit="Hearts"),
+                        top_card=Card(value="7", suit="Hearts"),
+                    ),
                 ],
-                Stack(cards=[Card(value="9", suit="Hearts")]),
+                Stack(cards=[Card(value="9", suit="Hearts"), Card(value="7", suit="Hearts")]),
                 nullcontext(),
             ),
             (

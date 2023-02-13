@@ -1,5 +1,4 @@
 import json
-from collections import defaultdict
 from multiprocessing.connection import Connection
 from typing import Optional
 
@@ -13,37 +12,29 @@ from src.utilities import serialize_card, serialize_cards
 
 
 class Messaging:
-    """Game is turn based
-    so communication is batch-delivered
-    to each player when their action is required.
-    Thus, we avoid any async communication complexities."""
-
     def __init__(
         self,
         number_of_players: int,
         connection: Connection,
     ) -> None:
 
-        self.update_queue: defaultdict = defaultdict(list)
         self.number_of_players = number_of_players
         self.connection = connection
         return
 
     def game_initiated(self) -> None:
         update = Update(update_type=UpdateType.GAME_INITIATED)
-        self.add_update_to_players_queues(update=update)
+        self.update_players(update=update)
         return
 
     def deck_depleted(self) -> None:
         update = Update(update_type=UpdateType.DECK_DEPLETED)
-        self.add_update_to_players_queues(update=update)
+        self.update_players(update=update)
         return
 
     def player_wins(self, player_number: int) -> None:
-        update = Update(update_type=UpdateType.PLAYER_WINS)
-        self.add_update_to_players_queues(update=update)
-        for player_number in range(self.number_of_players):
-            self.update_player(player_number=player_number)
+        update = Update(update_type=UpdateType.PLAYER_WINS, player_number=player_number)
+        self.update_players(update=update)
         return
 
     def card_draw(self, player_number: int, card: Card) -> None:
@@ -54,7 +45,7 @@ class Messaging:
     def you_drew_card(self, player_number: int, card: Card) -> None:
         serialized_card = serialize_card(card=card)
         update = Update(update_type=UpdateType.YOU_DREW_CARD, cards=serialized_card)
-        self.add_update_to_player_queue(player_number=player_number, update=update)
+        self.update_player(player_number=player_number, update=update)
         return
 
     def player_drew_card(self, player_number: int) -> None:
@@ -62,7 +53,7 @@ class Messaging:
             update_type=UpdateType.PLAYER_DREW_CARD,
             player_number=player_number,
         )
-        self.add_update_to_players_queues(update=update, exclude_player=player_number)
+        self.update_players(update=update, exclude_player=player_number)
         return
 
     def discard_pile_pickup(self, player_number: int, cards: Stack) -> None:
@@ -75,7 +66,14 @@ class Messaging:
             update_type=UpdateType.YOU_PICKED_UP_DISCARD_PILE,
             cards=serialize_cards(cards=cards),
         )
-        self.add_update_to_player_queue(player_number=player_number, update=update)
+        self.update_player(player_number=player_number, update=update)
+        return
+
+    def burn_discard_pile(self) -> None:
+        update = Update(
+            update_type=UpdateType.BURN_DISCARD_PILE,
+        )
+        self.update_players(update=update)
         return
 
     def player_picked_up_discard_pile(self, player_number: int) -> None:
@@ -83,7 +81,7 @@ class Messaging:
             update_type=UpdateType.PLAYER_PICKED_UP_DISCARD_PILE,
             player_number=player_number,
         )
-        self.add_update_to_players_queues(update=update, exclude_player=player_number)
+        self.update_players(update=update, exclude_player=player_number)
         return
 
     def play_from_hand(self, player_number: int, cards: Stack) -> None:
@@ -92,7 +90,7 @@ class Messaging:
             cards=serialize_cards(cards=cards),
             player_number=player_number,
         )
-        self.add_update_to_players_queues(update=update, exclude_player=player_number)
+        self.update_players(update=update)
 
         return
 
@@ -102,7 +100,7 @@ class Messaging:
             cards=serialize_cards(cards=cards),
             player_number=player_number,
         )
-        self.add_update_to_players_queues(update=update, exclude_player=player_number)
+        self.update_players(update=update)
 
         return
 
@@ -112,7 +110,7 @@ class Messaging:
             cards=serialize_card(card=card),
             player_number=player_number,
         )
-        self.add_update_to_players_queues(update=update, exclude_player=player_number)
+        self.update_players(update=update)
 
         return
 
@@ -122,7 +120,17 @@ class Messaging:
             cards=serialize_card(card=card),
             player_number=player_number,
         )
-        self.add_update_to_players_queues(update=update, exclude_player=player_number)
+        self.update_players(update=update)
+
+        return
+
+    def play_from_faceup_failure(self, player_number: int, cards: Stack) -> None:
+        update = Update(
+            update_type=UpdateType.PLAY_FROM_FACEUP_FAILURE,
+            cards=serialize_cards(cards=cards),
+            player_number=player_number,
+        )
+        self.update_players(update=update)
 
         return
 
@@ -132,52 +140,33 @@ class Messaging:
             cards=serialize_cards(cards=cards),
             player_number=player_number,
         )
-        self.add_update_to_players_queues(update=update, exclude_player=player_number)
-
-        return
-
-    def play_accepted(self, player_number: int) -> None:
-        update = Update(update_type=UpdateType.PLAY_ACCEPTED)
-        self.add_update_to_player_queue(player_number=player_number, update=update)
+        self.update_players(update=update)
 
         return
 
     def invalid_action(self, player_number: int, message: str) -> None:
         update = Update(update_type=UpdateType.INVALID_ACTION, message=message)
-        self.add_update_to_player_queue(player_number=player_number, update=update)
+        self.update_player(player_number=player_number, update=update)
         return
 
-    def update_and_request(self, player_number: int, request_type: RequestType) -> Response:
-        self.update_player(player_number=player_number)
-        response = self.request(player_number=player_number, request_type=request_type)
-        return response
-
-    def add_update_to_players_queues(
-        self, update: Update, exclude_player: Optional[int] = None
-    ) -> None:
+    def update_players(self, update: Update, exclude_player: Optional[int] = None) -> None:
         for player_number in range(self.number_of_players):
             if player_number != exclude_player:
-                self.add_update_to_player_queue(player_number=player_number, update=update)
+                self.update_player(player_number=player_number, update=update)
         return
 
-    def add_update_to_player_queue(self, player_number: int, update: Update) -> None:
-        self.update_queue[player_number].append(update)
-        return
+    def update_player(self, player_number: int, update: Update) -> None:
 
-    def update_player(self, player_number: int) -> None:
-
-        updates = self.update_queue[player_number]
-        updates_dict = [update.json() for update in updates]
+        update_json = update.json()
         body_dict = dict(
             type="update",
             recipient=player_number,
-            payload=updates_dict,
+            update=update_json,
         )
 
         body = json.dumps(body_dict)
 
         self.update(body=body)
-        self.update_queue[player_number] = []
 
         return
 

@@ -32,7 +32,7 @@ Make sure all players are running before the game manager is started.
 
 ### Run Player
 `docker-compose run --name player{{x}} --rm game-runner bash -c "just run-player"`
-where x = player number, starting from one. The name parameter is required because it is the player server name in the docker virtual network. Player numbers must be sequential, i.e. for a game with three players, player numbers would be 1, 2, and 3.
+where x = player number, starting from one. The name parameter is required because it is the player server name in the docker virtual network. Player numbers must be zero-indexed and sequential, i.e. for a game with three players, player numbers would be 0, 1, and 2.
 
 For example, player two will run the following command in their terminal.
 `docker-compose run --name player2 --rm game-runner bash -c "just run-player"`
