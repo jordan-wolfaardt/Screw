@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "screw-player"
-version = "0.0.1"
+version = "0.1.0"
 description = ""
 authors = ["Jordan Wolfaardt"]
 
@@ -19,4 +19,4 @@ pyzmq = "^25.0.0"
 
 [tool.black]
 line-length = 99
-target-version = ['py39']
+target-version = ['py310']

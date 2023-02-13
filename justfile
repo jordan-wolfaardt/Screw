@@ -16,7 +16,7 @@ lint-flake8:
 
 
 lint-mypy:
-  poetry run mypy -p test -m src --explicit-package-bases --namespace-packages
+  poetry run mypy . --explicit-package-bases --namespace-packages
 
 
 lint: lint-black lint-flake8 lint-mypy
@@ -33,6 +33,6 @@ run-game number-of-players:
   poetry run python src/main.py {{number-of-players}}
 
 
-run-player:
+run-player player-number:
   #!/usr/bin/env bash
-  poetry run python src/console_player.py
+  poetry run python src/console_player.py {{player-number}}

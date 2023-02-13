@@ -1,4 +1,4 @@
-from collections import Counter
+from itertools import combinations
 from typing import Optional
 
 from pydealer import (  # type: ignore
@@ -106,7 +106,6 @@ def serialize_card(card: Card) -> str:
 def split_card_name(card_name: str) -> tuple[str, str]:
 
     value: str
-
     value, suit = card_name.split(" of ")
 
     return suit, value
@@ -125,56 +124,81 @@ def build_face_up_table_stack(table_stacks: list[TableStack]) -> Stack:
     return face_up_table_stack
 
 
-def is_play_available(hand: Hand, last_play: Stack, played_cards: Stack) -> bool:
-    available_plays = get_available_plays_from_hand(hand=hand, last_play=last_play)
-    return (played_cards[0].value, len(played_cards)) in available_plays
+def is_play_available(
+    hand: Hand, last_play: Optional[Stack], cards_played: Stack, discard_pile: Stack
+) -> bool:
+    available_plays = get_available_plays_from_hand(
+        hand=hand, last_play=last_play, discard_pile=discard_pile
+    )
+    cards_played.sort()
+    return serialize_cards(cards=cards_played) in available_plays
 
 
-def get_available_plays_from_hand(hand: Hand, last_play: Stack) -> set[tuple["str", "int"]]:
+def get_available_plays_from_hand(
+    hand: Hand, last_play: Optional[Stack], discard_pile: Stack
+) -> set[str]:
 
     if len(hand.hand_stack):
-        return get_available_plays_from_stack(stack=hand.hand_stack, last_play=last_play)
+        play_from = hand.hand_stack
     elif len(hand.table_stacks):
-        return get_available_plays_from_stack(
-            stack=build_face_up_table_stack(hand.table_stacks), last_play=last_play
-        )
+        play_from = build_face_up_table_stack(hand.table_stacks)
     else:
         return set()
 
+    return get_available_plays_from_stack(
+        stack=play_from, last_play=last_play, discard_pile=discard_pile
+    )
 
-def get_available_plays_from_stack(stack: Stack, last_play: Stack) -> set[tuple["str", "int"]]:
 
-    available_plays: set[tuple["str", "int"]] = set()
+def get_available_plays_from_stack(
+    stack: Stack, last_play: Optional[Stack], discard_pile: Stack
+) -> set[str]:
 
-    value_order = {VALUES[i]: i for i in range(len(VALUES)) if VALUES[i] not in ["2", "10"]}
+    stack.sort()
 
-    if last_play is None or last_play[0].value == "2" or last_play[0].value == "10":
-        last_play_order = value_order["3"]
+    cards_by_value: dict[str, list[Card]] = {}
+
+    for card in stack:
+        if card.value in cards_by_value:
+            cards_by_value[card.value].append(card)
+        else:
+            cards_by_value[card.value] = [card]
+
+    available_plays: set[str] = set()
+
+    value_order = {VALUES[i]: i for i in range(len(VALUES))}
+
+    if last_play is None:
+        last_play_order = value_order["2"]
         last_play_count = 1
     else:
         last_play_order = value_order[last_play[0].value]
         last_play_count = len(last_play)
 
-    for card in stack:
-        if card.value in ["2", "10"]:
-            available_plays.add((card.value, 1))
-
-    value_counter = Counter([card.value for card in stack if card.value in value_order.keys()])
-
-    for value, count in value_counter.items():
-        if value_order[value] >= last_play_order and count >= last_play_count:
-            for i in range(last_play_count, count + 1):
-                available_plays.add((value, i))
+    for value, cards in cards_by_value.items():
+        if value in ["2", "10"]:
+            for card in cards:
+                available_plays.add(serialize_card(card=card))
+        elif (
+            len(cards) < 4
+            and len(discard_pile) >= (4 - len(cards))
+            and are_all_cards_same_value(
+                stack=Stack(cards=cards) + discard_pile[(-4 + len(cards)) :]  # noqa: E203
+            )
+        ):
+            card_stack = Stack(cards=cards)
+            card_stack.sort()
+            serialized_cards = serialize_cards(cards=card_stack)
+            available_plays.add(serialized_cards)
+        elif value_order[value] >= last_play_order and len(cards) >= last_play_count:
+            for length in range(last_play_count, len(cards) + 1):
+                for card_combination in combinations(cards, length):
+                    card_combination_stack = Stack(cards=card_combination)
+                    card_combination_stack.sort()
+                    serialized_cards = serialize_cards(cards=card_combination_stack)
+                    available_plays.add(serialized_cards)
 
     return available_plays
-
-
-def do_face_up_table_cards_exist(table_stacks: list[TableStack]) -> bool:
-    for table_stack in table_stacks:
-        if table_stack.top_card is not None:
-            return True
-
-    return False
 
 
 def count_player_cards(hand: Hand) -> int:
@@ -185,3 +209,10 @@ def count_player_cards(hand: Hand) -> int:
         else:
             count += 1
     return count
+
+
+def does_hand_have_known_cards(hand: Hand) -> bool:
+    hand_cards_exist = len(hand.hand_stack) > 0
+    face_up_cards_exist = len(build_face_up_table_stack(table_stacks=hand.table_stacks)) > 0
+    known_cards_exist = hand_cards_exist or face_up_cards_exist
+    return known_cards_exist
