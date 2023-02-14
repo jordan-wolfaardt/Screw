@@ -42,7 +42,7 @@ def route_communication(connection: Connection, sockets: dict) -> bool:
     logging.info(f"Message from game: {message}")
 
     if message == "Exiting":
-        return True
+        return False
     else:
         message_dict = json.loads(message)
         player_number = message_dict["recipient"]
@@ -52,7 +52,7 @@ def route_communication(connection: Connection, sockets: dict) -> bool:
         logging.info(f"Response: {response}")
         connection.send(response)
 
-    return False
+    return True
 
 
 if __name__ == "__main__":
@@ -68,8 +68,7 @@ if __name__ == "__main__":
     logging.info("Starting game")
     game_process.start()
 
-    while game_process.is_alive():
-
-        exit_flag = route_communication(connection=conn_main, sockets=sockets)
+    while route_communication(connection=conn_main, sockets=sockets):
+        pass
 
     game_process.join()

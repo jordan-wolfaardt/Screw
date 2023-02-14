@@ -235,8 +235,8 @@ class Game:
         card_stack = Stack(cards=[card])
 
         if does_play_trump_last_play(cards_played=card_stack, last_play=self.last_play):
-            self.play_cards(player_number=player_number, cards=card_stack)
             self.messaging.play_from_facedown_success(player_number=player_number, card=card)
+            self.play_cards(player_number=player_number, cards=card_stack)
         else:
             self.player_hands[player_number].hand_stack += card_stack
             self.pickup_discard_pile(player_number=player_number)
@@ -250,8 +250,8 @@ class Game:
             discard_pile=self.discard_pile,
         ):
             self.remove_cards_from_face_up(player_number=player_number, cards=cards_played)
-            self.play_cards(player_number=player_number, cards=cards_played)
             self.messaging.play_from_table(player_number=player_number, cards=cards_played)
+            self.play_cards(player_number=player_number, cards=cards_played)
         else:
             try:
                 self.remove_cards_from_face_up(player_number=player_number, cards=cards_played)
@@ -265,8 +265,8 @@ class Game:
 
     def handle_play_from_hand(self, player_number: int, cards_played: Stack) -> None:
         self.remove_cards_from_hand_stack(player_number=player_number, cards=cards_played)
-        self.play_cards(player_number=player_number, cards=cards_played)
         self.messaging.play_from_hand(player_number=player_number, cards=cards_played)
+        self.play_cards(player_number=player_number, cards=cards_played)
 
     def pickup_discard_pile(self, player_number: int) -> None:
         cards_list = self.discard_pile.empty(return_cards=True)

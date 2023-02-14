@@ -18,11 +18,14 @@ logging.basicConfig(level=logging.INFO)
 class Player(ABC):
     def __init__(self, player_number: int) -> None:
         self.socket: zmq.Socket
+        self.player_number = player_number
+        self.initialize_state()
+
+    def initialize_state(self) -> None:
         self.hand_set: set[str] = set()
         self.table_set: set[str] = set()
         self.table_stacks = TABLE_STACKS
         self.unaccepted_play_cards: str
-        self.player_number = player_number
         self.last_play: Optional[Stack] = None
         self.discard_pile = Stack()
 
@@ -47,15 +50,14 @@ class Player(ABC):
     def handle_update(self, message_dict: dict) -> None:
 
         update = Update.parse_raw(message_dict["update"])
-        self.update_hand(update=update)
+        self.update_state(update=update)
         print_update(update=update)
         self.socket.send_string("")
 
-    def update_hand(self, update: Update) -> None:
+    def update_state(self, update: Update) -> None:
         match update.update_type:
             case UpdateType.GAME_INITIATED:
-                self.hand_set = set()
-                self.table_set = set()
+                self.initialize_state()
             case UpdateType.YOU_DREW_CARD:
                 assert update.cards
                 self.hand_set.add(update.cards)
