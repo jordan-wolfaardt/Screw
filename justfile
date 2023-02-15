@@ -33,11 +33,6 @@ run-game number-of-players:
   poetry run python src/main.py {{number-of-players}}
 
 
-run-player player-number:
+run-player player-number player-type:
   #!/usr/bin/env bash
-  poetry run python src/console_player.py {{player-number}} human
-
-
-run-random-player player-number:
-  #!/usr/bin/env bash
-  poetry run python src/console_player.py {{player-number}} random
+  poetry run python src/console_player.py {{player-number}} {{player-type}}

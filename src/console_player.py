@@ -54,6 +54,15 @@ class Player(ABC):
         print_update(update=update)
         self.socket.send_string("")
 
+    def get_available_plays(self) -> list[str]:
+        available_cards_set = self.hand_set if len(self.hand_set) else self.table_set
+        available_cards_encoded = ",".join(available_cards_set)
+        available_cards = deserialize_cards(encoded_cards=available_cards_encoded)
+        available_plays = get_available_plays_from_stack(
+            stack=available_cards, last_play=self.last_play, discard_pile=self.discard_pile
+        )
+        return list(available_plays)
+
     def update_state(self, update: Update) -> None:
         match update.update_type:
             case UpdateType.GAME_INITIATED:
@@ -122,19 +131,15 @@ class HumanPlayer(Player):
             self.unaccepted_play_cards = encoded_cards
         elif message_dict["request_type"] == "PLAY":
             logging.info("It's your turn!")
-            play_option = "0"
-            while play_option not in ["1", "2"]:
-                play_option = input(
-                    "Enter 1 to pick up discard pile, 2 to play cards, or 3 to see your hand\n"
-                )
-                if play_option == "3":
-                    self.print_hand()
-            if play_option == "1":
+            self.print_hand()
+            play = input(
+                "Enter '1' to pick up discard pile or enter the cards you want to play, i.e. 'HQ,SQ'\n"
+            )
+            if play == "1":
                 response = Response(action=Action.PICK_UP_DISCARD_PILE)
-            elif play_option == "2":
-                encoded_cards = input("Enter the cards you want to play, i.e. 'HQ,SQ'\n")
-                response = Response(action=Action.PLAY_KNOWN_CARDS, cards=encoded_cards)
-                self.unaccepted_play_cards = encoded_cards
+            else:
+                response = Response(action=Action.PLAY_KNOWN_CARDS, cards=play)
+                self.unaccepted_play_cards = play
 
         self.socket.send_string(response.json())
 
@@ -143,8 +148,8 @@ class HumanPlayer(Player):
     def print_hand(self) -> None:
         hand_cards = list(self.hand_set)
         table_cards = list(self.table_set)
-        hand_cards.sort(key=lambda x: x[1])
-        table_cards.sort(key=lambda x: x[1])
+        hand_cards.sort(key=lambda x: PLAY_RANKS[x[1]])
+        table_cards.sort(key=lambda x: PLAY_RANKS[x[1]])
         logging.info(f"Hand cards: {hand_cards}")
         logging.info(f"Table cards: {table_cards}")
 
@@ -191,19 +196,56 @@ class RandomPlayer(ComputerPlayer):
         options = []
         if self.last_play is not None:
             options.append("1")
-        available_cards_set = self.hand_set if len(self.hand_set) else self.table_set
-        available_cards_encoded = ",".join(available_cards_set)
-        available_cards = deserialize_cards(encoded_cards=available_cards_encoded)
-        available_plays = get_available_plays_from_stack(
-            stack=available_cards, last_play=self.last_play, discard_pile=self.discard_pile
-        )
-        options += list(available_plays)
+        available_plays = self.get_available_plays()
+        options += available_plays
         return pick_one(options=options)
+
+
+class GreedyPlayer(ComputerPlayer):
+    def set_table_cards(self) -> str:
+        selected_table_cards = greedy_select_table_cards(card_set=self.hand_set)
+        return selected_table_cards
+
+    def play(self) -> str:
+        available_plays = self.get_available_plays()
+        if not len(available_plays):
+            return "1"
+
+        chosen_play = greedy_select_play(available_plays=available_plays)
+        return chosen_play
 
 
 def pick_one(options: list[str]) -> str:
     chosen_index = randint(0, len(options) - 1)
     return options[chosen_index]
+
+
+PLAY_RANKS = {
+    "T": 12,
+    "2": 11,
+    "A": 10,
+    "K": 9,
+    "Q": 8,
+    "J": 7,
+    "9": 6,
+    "8": 5,
+    "7": 4,
+    "6": 3,
+    "5": 2,
+    "4": 1,
+    "3": 0,
+}
+
+
+def greedy_select_table_cards(card_set: set[str]) -> str:
+    card_list = list(card_set)
+    card_list.sort(key=lambda c: PLAY_RANKS[c[1]], reverse=True)
+    return ",".join(card_list[:3])
+
+
+def greedy_select_play(available_plays: list[str]) -> str:
+    available_plays.sort(key=lambda c: (PLAY_RANKS[c[1]], -len(c)))
+    return available_plays[0]
 
 
 def print_update(update: Update) -> None:
@@ -231,6 +273,7 @@ if __name__ == "__main__":
     player_types = {
         "human": HumanPlayer,
         "random": RandomPlayer,
+        "greedy": GreedyPlayer,
     }
 
     player_class = player_types[player_type]
