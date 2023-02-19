@@ -22,8 +22,8 @@ class Messaging:
         self.connection = connection
         return
 
-    def game_initiated(self) -> None:
-        update = Update(update_type=UpdateType.GAME_INITIATED)
+    def game_initiated(self, number_of_players: int) -> None:
+        update = Update(update_type=UpdateType.GAME_INITIATED, number_of_players=number_of_players)
         self.update_players(update=update)
         return
 
