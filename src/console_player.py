@@ -9,7 +9,7 @@ import zmq
 
 from src.constants import PLAY_RANKS, TABLE_STACKS
 from src.game_types import Action, Response, Update
-from src.player_game_state import PlayerState
+from src.player_state import PlayerState
 from src.utilities import get_available_plays_from_stack
 
 logging.basicConfig(level=logging.INFO)
