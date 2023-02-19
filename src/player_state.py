@@ -6,7 +6,7 @@ from src.game_types import Stack, Update, UpdateType
 from src.utilities import deserialize_cards, serialize_cards
 
 
-class PlayerGameState:
+class PlayerState:
     def __init__(self, player_number: int) -> None:
         self.player_number = player_number
 

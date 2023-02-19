@@ -9,7 +9,7 @@ import zmq
 
 from src.constants import PLAY_RANKS, TABLE_STACKS
 from src.game_types import Action, Response, Update
-from src.player_game_state import PlayerGameState
+from src.player_game_state import PlayerState
 from src.utilities import get_available_plays_from_stack
 
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 class Player(ABC):
     def __init__(self, player_number: int) -> None:
         self.socket: zmq.Socket
-        self.game_state = PlayerGameState(player_number=player_number)
+        self.game_state = PlayerState(player_number=player_number)
 
     def bind_to_socket(
         self,
