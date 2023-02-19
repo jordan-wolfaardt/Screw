@@ -1,8 +1,12 @@
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Optional
 
+from pydealer import Card, Deck, Stack  # type: ignore
+
 from src.constants import DECK_LEN, TABLE_STACKS
-from src.game_types import Stack, Update, UpdateType
+from src.game import Game
+from src.game_types import TableStack, Update, UpdateType
 from src.utilities import deserialize_cards, serialize_cards
 
 
@@ -106,6 +110,7 @@ class PlayerState:
         return common_cards + player_cards + opponent_cards
 
     def build_state(self, number_of_players: int) -> None:
+        self.number_of_players = number_of_players
         self.deck_length = DECK_LEN - (TABLE_STACKS * number_of_players)
         self.last_play = None
         self.discard_pile = Stack()
@@ -249,6 +254,90 @@ class PlayerState:
 
     def get_discard_pile(self) -> Stack:
         return self.discard_pile
+
+    def build_game_state(self, game: Game) -> Game:
+        """
+        This function instantiates a Game object from the information a player knows.
+        All unknown cards are assigned randomnly.
+        The purpose is then the player can use the game object for simulation.
+        """
+
+        # initialize a new deck
+        game.deck = Deck()
+        game.deck.shuffle()
+
+        table_stacks: list[TableStack]
+
+        # set known cards
+        # known cards have to be set before unknown cards so we know what to remove from the deck
+        game.discard_pile = deepcopy(self.discard_pile)
+        for card in self.discard_pile:
+            game.deck.get(card.name)
+
+        game.eliminated_cards = deepcopy(self.eliminated_cards)
+        for card in self.eliminated_cards:
+            game.deck.get(card.name)
+
+        for player_number in range(self.number_of_players):
+            if player_number == self.player_number:
+
+                game.player_hands[player_number].hand_stack = deepcopy(self.hand.hand_stack)
+                for card in self.hand.hand_stack:
+                    game.deck.get(card.name)
+
+                table_stacks = []
+                for table_stack_number in range(self.hand.table_stacks):
+                    table_stack = TableStack(
+                        top_card=None,
+                        bottom_card=Card(suit="Spades", value="Ace"),  # this is a dummy card
+                    )
+                    table_stacks.append(table_stack)
+
+                for i, card in enumerate(self.hand.table_stack):
+                    table_stacks[i].top_card == card
+                    game.deck.get(card.name)
+
+                game.player_hands[player_number].table_stacks = table_stacks
+
+            else:
+
+                game.player_hands[player_number].hand_stack = deepcopy(
+                    self.opponent_hands[player_number].hand_stack
+                )
+                for card in self.opponent_hands[player_number].hand_stack:
+                    game.deck.get(card.name)
+
+                table_stacks = []
+                for table_stack_number in range(self.opponent_hands[player_number].table_stacks):
+                    table_stack = TableStack(
+                        top_card=None,
+                        bottom_card=Card(suit="Spades", value="Ace"),  # this is a dummy card
+                    )
+                    table_stacks.append(table_stack)
+
+                for i, card in enumerate(self.opponent_hands[player_number].table_stack):
+                    table_stacks[i].top_card == card
+                    game.deck.get(card.name)
+
+                game.player_hands[player_number].table_stacks = table_stacks
+
+        # set unknown cards
+        for player_number in range(self.number_of_players):
+
+            for table_stack in game.player_hands[player_number].table_stacks:
+                card_list = game.deck.deal(num=1)
+                table_stack.bottom_card = card_list[0]
+
+            if player_number != self.player_number:
+                card_list = game.deck.deal(
+                    num=self.opponent_hands[player_number].hand_count_unknown
+                )
+                card_stack = Stack(cards=card_list)
+                game.player_hands[player_number].hand_stack += card_stack
+
+        assert len(game.deck) == self.deck_length
+
+        return game
 
 
 @dataclass
