@@ -4,13 +4,13 @@ import sys
 from abc import ABC, abstractmethod
 from itertools import combinations
 from random import randint
-from typing import Optional
 
 import zmq
 
-from src.constants import TABLE_STACKS
-from src.game_types import Action, Response, Stack, Update, UpdateType
-from src.utilities import deserialize_cards, get_available_plays_from_stack
+from src.constants import PLAY_RANKS, TABLE_STACKS
+from src.game_types import Action, Response, Update
+from src.player_game_state import PlayerGameState
+from src.utilities import get_available_plays_from_stack
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,16 +18,7 @@ logging.basicConfig(level=logging.INFO)
 class Player(ABC):
     def __init__(self, player_number: int) -> None:
         self.socket: zmq.Socket
-        self.player_number = player_number
-        self.initialize_state()
-
-    def initialize_state(self) -> None:
-        self.hand_set: set[str] = set()
-        self.table_set: set[str] = set()
-        self.table_stacks = TABLE_STACKS
-        self.unaccepted_play_cards: str
-        self.last_play: Optional[Stack] = None
-        self.discard_pile = Stack()
+        self.game_state = PlayerGameState(player_number=player_number)
 
     def bind_to_socket(
         self,
@@ -50,70 +41,18 @@ class Player(ABC):
     def handle_update(self, message_dict: dict) -> None:
 
         update = Update.parse_raw(message_dict["update"])
-        self.update_state(update=update)
+        self.game_state.update_state(update=update)
         print_update(update=update)
         self.socket.send_string("")
 
     def get_available_plays(self) -> list[str]:
-        available_cards_set = self.hand_set if len(self.hand_set) else self.table_set
-        available_cards_encoded = ",".join(available_cards_set)
-        available_cards = deserialize_cards(encoded_cards=available_cards_encoded)
+        available_cards = self.game_state.get_available_cards()
+        last_play = self.game_state.get_last_play()
+        discard_pile = self.game_state.get_discard_pile()
         available_plays = get_available_plays_from_stack(
-            stack=available_cards, last_play=self.last_play, discard_pile=self.discard_pile
+            stack=available_cards, last_play=last_play, discard_pile=discard_pile
         )
         return list(available_plays)
-
-    def update_state(self, update: Update) -> None:
-        match update.update_type:
-            case UpdateType.GAME_INITIATED:
-                self.initialize_state()
-            case UpdateType.YOU_DREW_CARD:
-                assert update.cards
-                self.hand_set.add(update.cards)
-            case UpdateType.YOU_PICKED_UP_DISCARD_PILE:
-                assert update.cards
-                for card in update.cards.split(","):
-                    self.hand_set.add(card)
-                self.last_play = None
-                self.discard_pile.empty()
-            case UpdateType.PLAYER_PICKED_UP_DISCARD_PILE | UpdateType.BURN_DISCARD_PILE:
-                self.last_play = None
-                self.discard_pile.empty()
-            case UpdateType.PLAY_FROM_HAND | UpdateType.PLAY_FROM_TABLE | UpdateType.PLAY_FROM_FACEDOWN_SUCCESS:
-                assert update.cards
-                deserialized_cards = deserialize_cards(encoded_cards=update.cards)
-                self.last_play = deserialized_cards
-                self.discard_pile += deserialized_cards
-            case _:
-                pass
-
-        if getattr(update, "player_number", -1) == self.player_number:
-            match update.update_type:
-                case UpdateType.PLAY_FROM_FACEDOWN_SUCCESS:
-                    self.table_stacks -= 1
-                case UpdateType.PLAY_FROM_FACEDOWN_FAILURE:
-                    assert update.cards
-                    self.hand_set.add(update.cards)
-                    self.table_stacks -= 1
-                case UpdateType.PLAY_FROM_FACEUP_FAILURE:
-                    for card in self.unaccepted_play_cards.split(","):
-                        self.hand_set.add(card)
-                        self.table_set.remove(card)
-                case UpdateType.SET_TABLE_CARDS:
-                    card_list = self.unaccepted_play_cards.split(",")
-                    for card in card_list:
-                        self.table_set.add(card)
-                        self.hand_set.remove(card)
-                case UpdateType.PLAY_FROM_HAND:
-                    card_list = self.unaccepted_play_cards.split(",")
-                    for card in card_list:
-                        self.hand_set.remove(card)
-                case UpdateType.PLAY_FROM_TABLE:
-                    card_list = self.unaccepted_play_cards.split(",")
-                    for card in card_list:
-                        self.table_set.remove(card)
-                case _:
-                    pass
 
     @abstractmethod
     def handle_request(self, message_dict: dict) -> None:
@@ -128,7 +67,6 @@ class HumanPlayer(Player):
         if message_dict["request_type"] == "SET_TABLE_CARDS":
             encoded_cards = input(f"Set your {TABLE_STACKS} table cards, i.e. 'HQ,ST,S9'\n")
             response = Response(action=Action.SET_TABLE_CARDS, cards=encoded_cards)
-            self.unaccepted_play_cards = encoded_cards
         elif message_dict["request_type"] == "PLAY":
             logging.info("It's your turn!")
             self.print_hand()
@@ -139,15 +77,14 @@ class HumanPlayer(Player):
                 response = Response(action=Action.PICK_UP_DISCARD_PILE)
             else:
                 response = Response(action=Action.PLAY_KNOWN_CARDS, cards=play)
-                self.unaccepted_play_cards = play
 
         self.socket.send_string(response.json())
 
         logging.info("Response sent")
 
     def print_hand(self) -> None:
-        hand_cards = list(self.hand_set)
-        table_cards = list(self.table_set)
+        hand_cards = self.game_state.get_hand_cards_list()
+        table_cards = self.game_state.get_table_cards_list()
         hand_cards.sort(key=lambda x: PLAY_RANKS[x[1]])
         table_cards.sort(key=lambda x: PLAY_RANKS[x[1]])
         logging.info(f"Hand cards: {hand_cards}")
@@ -162,14 +99,12 @@ class ComputerPlayer(Player):
         if message_dict["request_type"] == "SET_TABLE_CARDS":
             encoded_cards = self.set_table_cards()
             response = Response(action=Action.SET_TABLE_CARDS, cards=encoded_cards)
-            self.unaccepted_play_cards = encoded_cards
         elif message_dict["request_type"] == "PLAY":
             play = self.play()
             if play == "1":
                 response = Response(action=Action.PICK_UP_DISCARD_PILE)
             else:
                 response = Response(action=Action.PLAY_KNOWN_CARDS, cards=play)
-                self.unaccepted_play_cards = play
 
         self.socket.send_string(response.json())
 
@@ -186,15 +121,16 @@ class ComputerPlayer(Player):
 
 class RandomPlayer(ComputerPlayer):
     def set_table_cards(self) -> str:
+        hand_cards = self.game_state.get_hand_cards_list()
         card_combinations = [
-            ",".join(combination) for combination in combinations(self.hand_set, TABLE_STACKS)
+            ",".join(combination) for combination in combinations(hand_cards, TABLE_STACKS)
         ]
         chosen_combination = pick_one(options=card_combinations)
         return chosen_combination
 
     def play(self) -> str:
         options = []
-        if self.last_play is not None:
+        if self.game_state.get_last_play() is not None:
             options.append("1")
         available_plays = self.get_available_plays()
         options += available_plays
@@ -203,7 +139,8 @@ class RandomPlayer(ComputerPlayer):
 
 class GreedyPlayer(ComputerPlayer):
     def set_table_cards(self) -> str:
-        selected_table_cards = greedy_select_table_cards(card_set=self.hand_set)
+        hand_cards = self.game_state.get_hand_cards_list()
+        selected_table_cards = greedy_select_table_cards(card_list=hand_cards)
         return selected_table_cards
 
     def play(self) -> str:
@@ -220,25 +157,7 @@ def pick_one(options: list[str]) -> str:
     return options[chosen_index]
 
 
-PLAY_RANKS = {
-    "T": 12,
-    "2": 11,
-    "A": 10,
-    "K": 9,
-    "Q": 8,
-    "J": 7,
-    "9": 6,
-    "8": 5,
-    "7": 4,
-    "6": 3,
-    "5": 2,
-    "4": 1,
-    "3": 0,
-}
-
-
-def greedy_select_table_cards(card_set: set[str]) -> str:
-    card_list = list(card_set)
+def greedy_select_table_cards(card_list: list[str]) -> str:
     card_list.sort(key=lambda c: PLAY_RANKS[c[1]], reverse=True)
     return ",".join(card_list[:3])
 
@@ -270,13 +189,14 @@ if __name__ == "__main__":
     player_number = int(sys.argv[1])
     player_type = sys.argv[2]
 
-    player_types = {
-        "human": HumanPlayer,
-        "random": RandomPlayer,
-        "greedy": GreedyPlayer,
-    }
+    player_class: type[Player]
 
-    player_class = player_types[player_type]
+    if player_type == "human":
+        player_class = HumanPlayer
+    if player_type == "random":
+        player_class = RandomPlayer
+    if player_type == "greedy":
+        player_class = GreedyPlayer
 
     player = player_class(player_number=player_number)
     player.bind_to_socket()

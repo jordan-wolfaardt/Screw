@@ -43,7 +43,7 @@ class Game:
         self.deck = Deck()
         self.player_hands: list[Hand] = [Hand() for i in range(number_of_players)]
         self.messaging = messaging
-        self.messaging.game_initiated()
+        self.messaging.game_initiated(number_of_players=number_of_players)
         self.assert_conservation_of_cards()
 
     def setup(self) -> None:

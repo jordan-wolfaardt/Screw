@@ -56,7 +56,6 @@ class UpdateType(Enum):
     PLAY_FROM_FACEDOWN_FAILURE = 404
     PLAY_FROM_FACEUP_FAILURE = 405
     SET_TABLE_CARDS = 500
-    # PLAY_ACCEPTED = 600
     INVALID_ACTION = 700
 
 
@@ -64,6 +63,7 @@ class Update(BaseModel):
     update_type: UpdateType
     player_number: Optional[int] = None
     cards: Optional[str] = None
+    number_of_players: Optional[int] = None
     message: Optional[str] = None
 
 
