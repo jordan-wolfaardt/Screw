@@ -31,7 +31,7 @@ RUN cd /usr/local/bin && ln -s ${POETRY_PATH} && chmod +x ${POETRY_PATH}
 EXPOSE 5000
 
 COPY ./pyproject.toml ./
-RUN poetry config virtualenvs.create true \
+RUN poetry config virtualenvs.create false \
     && poetry install -vvv --no-interaction --no-ansi --no-root
 
 COPY . ./

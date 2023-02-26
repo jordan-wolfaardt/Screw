@@ -216,3 +216,15 @@ def does_hand_have_known_cards(hand: Hand) -> bool:
     face_up_cards_exist = len(build_face_up_table_stack(table_stacks=hand.table_stacks)) > 0
     known_cards_exist = hand_cards_exist or face_up_cards_exist
     return known_cards_exist
+
+
+def is_card_in_stack(card: Card, stack: Stack) -> bool:
+    """
+    The pydealer library suggests you should be able to do
+    card in stack... but this is not reliable
+    """
+
+    serialized_card = serialize_card(card=card)
+    serialized_cards = serialize_cards(cards=stack)
+    serialized_cards_list = serialized_cards.split(",")
+    return serialized_card in serialized_cards_list
