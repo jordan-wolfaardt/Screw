@@ -39,6 +39,7 @@ class Game:
         self.player_turn = 0
         self.eliminated_cards = Stack()
         self.win: Optional[int] = None
+        self.table_cards_set = False
 
         self.deck = Deck()
         self.player_hands: list[Hand] = [Hand() for i in range(number_of_players)]
@@ -56,10 +57,12 @@ class Game:
         self.deal_table_cards()
         self.deal_hand_cards()
 
-    def set_table_cards(self) -> None:
+    def set_table_cards(self, start_player_number: int = 0) -> None:
 
-        for player_number in range(self.number_of_players):
+        for player_number in range(start_player_number, self.number_of_players):
             self.loop_until_valid_table_cards(player_number=player_number)
+
+        self.table_cards_set = True
 
     def assert_conservation_of_cards(self) -> None:
         count_players_cards = sum(count_player_cards(hand) for hand in self.player_hands)
